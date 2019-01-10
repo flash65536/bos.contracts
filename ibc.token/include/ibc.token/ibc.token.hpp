@@ -50,15 +50,13 @@ namespace eosio {
       ~token();
 
       [[eosio::action]]
-      void test(name who, uint64_t id );
-
-      [[eosio::action]]
-      void setglobal( name       ibc_contract,
+      void setglobal( name       ibc_chain_contract,
                       name       peerchain_ibc_token_contract,
                       uint32_t   max_origtrxs_table_records,
                       uint32_t   cache_cashtrxs_table_records,
                       uint32_t   max_original_trxs_per_block,
                       bool       active );
+
 
       [[eosio::action]]
       void regacpttoken( name        original_contract,
@@ -94,6 +92,7 @@ namespace eosio {
                        asset  service_fee_fixed,
                        double service_fee_ratio );
 
+
       [[eosio::action]]
       void regpegtoken( asset       max_supply,
                         asset       min_once_withdraw,
@@ -113,6 +112,7 @@ namespace eosio {
 
       [[eosio::action]]
       void setpegbool( symbol_code symcode, string which, bool value );
+
 
       // called in C apply function
       void transfer_notify( name    code,
@@ -147,9 +147,21 @@ namespace eosio {
                         transaction_id_type                    cash_trx_id,   // redundant, facilitate indexing and checking
                         transaction_id_type                    orig_trx_id ); // redundant, facilitate indexing and checking
 
+      // called by ibc plugin repeatedly
+      [[eosio::action]]
+      void rollback( const transaction_id_type trx_id, name relay );   // check if any orignal transactions should be rolled back, rollback them if have
+
+      // called by ibc plugin repeatedly when there are unrollbackable original transactions
+      [[eosio::action]]
+      void rmunablerb( const transaction_id_type trx_id, name relay );   // force to remove unrollbackable transaction
+
       // this action maybe needed when repairing the ibc system manually
       [[eosio::action]]
-      void rollback( const std::vector<transaction_id_type> trxs );
+      void fcrollback( const std::vector<transaction_id_type> trxs, string memo );   // force rollback
+
+      // this action maybe needed when can not rollback (because eosio account can refuse transfer token to it)
+      [[eosio::action]]
+      void fcrmorigtrx( const std::vector<transaction_id_type> trxs, string memo );   // force remove original transaction records, the parameter must be trx_id, in order to query the original transaction conveniently in the later period.
 
       // this action maybe needed when repairing the ibc system manually
       [[eosio::action]]
@@ -162,10 +174,13 @@ namespace eosio {
       void lockall();   // when locked, transfer, withdraw and cash action will not allowed to execute for all token
 
       [[eosio::action]]
-      void unlockall();   // when unlocked, transfer, withdraw and cash action will allowed to execute for all token
+      void unlockall();   // when unlocked, the restrictions caused by execute lockall function will be removed
 
       [[eosio::action]]
       void tmplock( uint32_t minutes );   // when executed, transfer, withdraw and cash action will not allowed to execute for all token for a period of time
+
+      [[eosio::action]]
+      void rmtmplock();   // when executed,  the restrictions caused by execute tmplock function will be removed
 
       [[eosio::action]]
       void open( name owner, const symbol_code& symcode, name ram_payer );
@@ -191,7 +206,7 @@ namespace eosio {
       struct [[eosio::table("globals")]] global_state {
          global_state(){}
 
-         name              ibc_contract;
+         name              ibc_chain_contract;
          name              peerchain_ibc_token_contract;
          uint32_t          max_origtrxs_table_records;
          uint32_t          cache_cashtrxs_table_records;
@@ -201,8 +216,8 @@ namespace eosio {
          uint32_t          lock_start_time = 0;
          uint32_t          lock_minutes = 0;
 
-         // explicit serialization macro necessary, without this, error "Exceeded call depth maximum" will occur when call state_singleton.set(state)
-         EOSLIB_SERIALIZE( global_state, (ibc_contract)(peerchain_ibc_token_contract)(max_origtrxs_table_records)
+         // explicit serialization macro is necessary, without this, error "Exceeded call depth maximum" will occur when call state_singleton.set(state)
+         EOSLIB_SERIALIZE( global_state, (ibc_chain_contract)(peerchain_ibc_token_contract)(max_origtrxs_table_records)
                (cache_cashtrxs_table_records)(max_original_trxs_per_block)(active)(lock_start_time)(lock_minutes) )
       };
 
@@ -216,13 +231,13 @@ namespace eosio {
       struct [[eosio::table("globalm")]] global_mutable {
          global_mutable(){}
 
-         uint64_t    cash_seq_num = 0;    // set by seq_num in cash action from cashconfirm action, and must be increase one by one, and start from zero
-         uint32_t    last_finished_trx_block_time_slot = 0;
+         uint64_t    cash_seq_num = 0;    // set by seq_num in cash action from cashconfirm action, and must be increase one by one, and start from one
+         uint32_t    last_confirmed_orig_trx_block_time_slot = 0; // used to determine which failed original transactions should be rolled back
          uint32_t    current_block_time_slot = 0;
          uint32_t    current_block_trxs = 0;
-         uint64_t    origtrxs_tb_next_id = 1;
+         uint64_t    origtrxs_tb_next_id = 1; // used to retain an incremental id for table origtrxs
 
-         EOSLIB_SERIALIZE( global_mutable, (cash_seq_num)(last_finished_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
+         EOSLIB_SERIALIZE( global_mutable, (cash_seq_num)(last_confirmed_orig_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
       };
       eosio::singleton< "globalm"_n, global_mutable > _global_mutable;
       global_mutable                                  _gmutable;
@@ -334,7 +349,7 @@ namespace eosio {
       >  _origtrxs;
 
       void origtrxs_emplace( transfer_action_info action );
-      void defered_rollback_trx( transaction_id_type trx_id );
+      void rollback_trx( transaction_id_type trx_id );
       bool is_trx_id_exist_in_origtrxs_tb( transaction_id_type trx_id );
       void erase_record_in_origtrxs_tb_by_trx_id_for_confirmed( transaction_id_type trx_id );
 
@@ -396,6 +411,17 @@ namespace eosio {
       > _trxbls;
 
       bool is_in_trxbls( transaction_id_type trx_id );
+
+
+      // use to record removed unrollbackable transactions
+      struct [[eosio::table]] deleted_unrollbackable_trx_info {
+         uint64_t                id; // auto-increment
+         transaction_id_type     trx_id;
+
+         uint64_t primary_key()const { return id; }
+      };
+      eosio::multi_index< "rmdunrbs"_n, deleted_unrollbackable_trx_info>  _rmdunrbs;
+
 
       void withdraw( name from, name peerchain_receiver, asset quantity, string memo );
       void sub_balance( name owner, asset value );

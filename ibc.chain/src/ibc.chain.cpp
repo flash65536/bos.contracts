@@ -100,7 +100,7 @@ namespace eosio {
       require_auth( relay );
 
       std::vector<signed_block_header> headers = unpack<std::vector<signed_block_header>>( headers_data );
-      const auto& last_section = *(--_sections.end());
+      const auto& last_section = *(_sections.rbegin());
       if ( headers.front().block_num() > last_section.last + 1 ) {
          if ( !last_section.valid ) {
             remove_section( last_section.first );
@@ -112,6 +112,78 @@ namespace eosio {
 
       for ( const auto & header : headers ){
          pushheader( header );
+      }
+   }
+
+   void chain::rminvalidls( const name& relay ) {
+      eosio_assert( is_relay( _self, relay ), "relay not found");
+      require_auth( relay );
+
+      auto it = --_sections.end();
+      eosio_assert( false == it->valid, "lwcls is valid, can't remove");
+
+      for( uint64_t num = it->first; num <= it->last; ++num ){
+         auto existing = _chaindb.find( num );
+         if ( existing != _chaindb.end() ){
+            _chaindb.erase( existing );
+         }
+      }
+      _sections.erase( it );
+   }
+
+   static const uint32_t max_delete = 150; // max delete 150 records per time, in order to avoid exceed cpu limit
+   void chain::rmfirstsctn( const name& relay ){
+      eosio_assert( is_relay( _self, relay ), "relay not found");
+      require_auth( relay );
+
+      auto it = _sections.begin();
+      auto next = ++it;
+      eosio_assert( next != _sections.end(), "can not delete the last section");
+      eosio_assert( next->valid == true, "next section must be valid");
+
+      uint32_t count = 0;
+      auto begin = _sections.begin();
+      if ( begin->last - begin->first + 1 > max_delete ){
+         for ( uint32_t num = begin->first; num < begin->first + max_delete; ++num ){
+            auto it = _chaindb.find( num );
+            if ( it != _chaindb.end() ){
+               print("-- delete block1 --");print( num );
+               _chaindb.erase( it );
+            }
+         }
+
+         section_type sctn = *begin;
+         sctn.first += max_delete;
+
+         _sections.erase( begin );
+         _sections.emplace( _self, [&]( auto& r ) {
+            r = std::move( sctn );
+         });
+
+         return;
+      } else {
+         for ( uint32_t num = begin->first; num <= begin->last; ++num ){
+            auto it = _chaindb.find( num );
+            if ( it != _chaindb.end() ){
+               print("-- delete block2 --");print( num );
+               _chaindb.erase( it );
+            }
+         }
+
+         count += ( begin->last - begin->first + 1 );
+         _sections.erase( begin );
+      }
+
+      // do this again to ensure that all old chaindb data is deleted
+      uint32_t lwcls_first = _sections.begin()->first;
+      while ( count++ <= max_delete ){
+         auto begin = _chaindb.begin();
+         if ( begin->block_num < lwcls_first ){
+            _chaindb.erase( begin );
+            print("-- delete block3 --");print(begin->block_num);
+         } else {
+            break;
+         }
       }
    }
 
@@ -143,7 +215,7 @@ namespace eosio {
       return false;
    }
 
-   void chain::blockmerkle( uint32_t block_num, incremental_merkle merkle, name relay ){
+   void chain::blockmerkle( uint64_t block_num, incremental_merkle merkle, name relay ){
       static constexpr uint32_t range = 2 << 13;  // 8192 blocks, about 1.14 hours
       static constexpr uint32_t recent = range * ( 2 << 5 ); // about 36.4 hours
 
@@ -191,7 +263,7 @@ namespace eosio {
       });
    }
 
-   // --- private methods ----
+   // ---- private methods ----
 
    /**
     * Notes
@@ -203,9 +275,11 @@ namespace eosio {
                            const incremental_merkle&  blockroot_merkle ){
       eosio_assert( !header.new_producers, "section root header can not contain new_producers" );
 
+      remove_first_section_or_not();
+
       auto header_block_num = header.block_num();
 
-      const auto& last_section = *(--_sections.end());
+      const auto& last_section = *(_sections.rbegin());
       eosio_assert( last_section.valid, "last_section is not valid" );
       eosio_assert( header_block_num > last_section.last + 1, "header_block_num should larger then last_section.last + 1" );
 
@@ -252,7 +326,7 @@ namespace eosio {
       auto header_block_num = header.block_num();
       auto header_block_id = header.id();
 
-      const auto& last_section = *(--_sections.end());
+      const auto& last_section = *(_sections.rbegin());
       auto last_section_first = last_section.first;
       auto last_section_last = last_section.last;
       
@@ -262,7 +336,7 @@ namespace eosio {
       // delete old branch
       if ( header_block_num < last_section_last + 1){
          auto result = _chaindb.get( header_block_num );
-         eosio_assert( std::memcmp(header_block_id.hash, result.block_id.hash, 32) != 0, ("block repeated: " + std::to_string(header_block_num)).c_str()  );
+         eosio_assert( std::memcmp(header_block_id.hash, result.block_id.hash, 32) != 0, ("block repeated: " + std::to_string(header_block_num)).c_str() );
 
          if ( header_block_num - last_section_first < _gstate.lib_depth ){
             _sections.modify( last_section, same_payer, [&]( auto& r ) {
@@ -270,14 +344,19 @@ namespace eosio {
             });
          }
 
-         while ( ( --_chaindb.end() )->block_num != header_block_num - 1 ){
+         while ( _chaindb.rbegin()->block_num != header_block_num - 1 ){
             _chaindb.erase( --_chaindb.end() );
          }
+
+         _sections.modify( last_section, same_payer, [&]( auto& r ) {
+            r.clear_from( header_block_num );
+         });
+
          print_f("-- block deleted: from % back to % --", last_section_last, header_block_num);
       }
 
       // verify linkable
-      auto last_bhs = *(--_chaindb.end());   // don't make pointer or const, for it needs change
+      auto last_bhs = *(_chaindb.rbegin());   // don't make pointer or const, for it needs change
       eosio_assert(std::memcmp(last_bhs.block_id.hash, header.previous.hash, 32) == 0 , "unlinkable block" );
 
       // verify new block
@@ -304,32 +383,49 @@ namespace eosio {
             r.schedule_hash   = get_checksum256( *header.new_producers );
          });
 
+         if ( _prodsches.rbegin()->id - _prodsches.begin()->id >= prodsches_max_records ){
+            _prodsches.erase( _prodsches.begin() );
+         }
+
          bhs.pending_schedule_id = new_schedule_id;
          bhs.active_schedule_id  = last_bhs.active_schedule_id;
       } else {
          if ( last_bhs.active_schedule_id == last_bhs.pending_schedule_id ){  // normal circumstances
 
-            // check if valid
-            if ( header_block_num - last_section_first >= _gstate.lib_depth && !last_section.valid ){
+            // check if last_section valid
+            bool valid = false;
+            if ( last_section.newprod_block_num != 0 ){
+               if ( header_block_num - last_section.newprod_block_num >= 325 + _gstate.lib_depth ){
+                  valid = true;
+               }
+            } else {
+               if ( header_block_num - last_section_first >= _gstate.lib_depth ){
+                  valid = true;
+               }
+            }
+
+            if ( valid && ! last_section.valid ){
                _sections.modify( last_section, same_payer, [&]( auto& r ) {
                   r.valid = true;
                });
             }
+
             bhs.active_schedule_id  = last_bhs.active_schedule_id;
             bhs.pending_schedule_id = last_bhs.pending_schedule_id;
          } else { // producers replacement interval
             auto last_pending_schedule_version = _prodsches.get( last_bhs.pending_schedule_id ).schedule.version;
-            if ( header.schedule_version == last_pending_schedule_version ){
+            if ( header.schedule_version == last_pending_schedule_version ){  // producers replacement finished
+               /* important! infact header_block_num - last_section.newprod_block_num should be approximately equal to 325 */
                eosio_assert( header_block_num - last_section.newprod_block_num > 20 * 12, "header_block_num - last_section.newprod_block_num > 20 * 12 failed");
                bhs.active_schedule_id  = last_bhs.pending_schedule_id;
-            } else {
+            } else { // producers replacement not finished
                bhs.active_schedule_id  = last_bhs.active_schedule_id;
             }
             bhs.pending_schedule_id = last_bhs.pending_schedule_id;
          }
       }
 
-      bhs.header              = std::move(header);
+      bhs.header = std::move(header);
 
       if ( bhs.header.producer == last_bhs.header.producer && bhs.active_schedule_id == last_bhs.active_schedule_id ){
          bhs.block_signing_key = std::move(last_bhs.block_signing_key);
@@ -344,16 +440,17 @@ namespace eosio {
          r = std::move(bhs);
       });
 
-      auto active_schedule = _prodsches.get( bhs.active_schedule_id ).schedule;
+      const auto& active_schedule = _prodsches.get( bhs.active_schedule_id ).schedule;
 
       _sections.modify( last_section, same_payer, [&]( auto& s ) {
          s.last = header_block_num;
-         s.add( header.producer, header_block_num, active_schedule );
+         s.add( header.producer, header.timestamp.slot, header_block_num, active_schedule );
       });
+
+      trim_last_section_or_not();
 
       print_f("-- block added: % --", header_block_num);
    }
-
 
    digest_type chain::bhs_sig_digest( const block_header_state& hs ) const {
       auto it = _prodsches.find( hs.pending_schedule_id );
@@ -403,63 +500,127 @@ namespace eosio {
       }
    }
 
+   const static uint32_t trim_length = 50;
 
+   void chain::trim_last_section_or_not() {
+      auto lwcls = *(_sections.rbegin());
+      if ( lwcls.last - lwcls.first > section_max_length ){
+
+         // delete first 100 blocks in _chaindb
+         for ( uint32_t num = lwcls.first; num < lwcls.first + trim_length; ++num ){
+            auto it = _chaindb.find( num );
+            if ( it != _chaindb.end() ){
+               _chaindb.erase( it );
+            }
+         }
+
+         // construct new section info
+         section_type ls = lwcls;
+         ls.first += trim_length;
+
+         // replace old section with new section in _sections
+         _sections.erase( --_sections.end() );
+         _sections.emplace( _self, [&]( auto& r ) {
+            r = std::move( ls );
+         });
+      }
+   }
+
+   void chain::remove_first_section_or_not(){
+      uint32_t count = 0;
+      for( auto it = _sections.begin(); it != _sections.end(); ++it) {
+         ++count;
+      }
+      if ( count >= sections_max_records ){
+         remove_section( _sections.begin()->first );
+      }
+   }
 
 // ---- class: section_type ----
 
+   name get_scheduled_producer( uint32_t tslot, const producer_schedule& active_schedule) {
+      auto index = tslot % (active_schedule.producers.size() * producer_repetitions);
+      index /= producer_repetitions;
+      return active_schedule.producers[index].producer_name;
+   }
+
+
 #define BIGNUM  2000
 #define MAXSPAN 4
-   void section_type::add( name pro, uint32_t num, const producer_schedule& sch ) {
+   void section_type::add( name prod, uint32_t num, uint32_t tslot, const producer_schedule& sch ) {
+
+      if ( tslot == 0 ){   // create section
+         return;
+      }
+
+      // one node per chain test model
+      if ( sch.producers.size() == 1 && sch.producers.front().producer_name == "eosio"_n ){  // for one node test
+         return;
+      }
+
+      // complete two blockchain networks model
+      eosio_assert( sch.producers.size() > 15, "producers.size() must greater then 15" ); // should be equal to 21 infact
+
+      // if no record
       if ( producers.empty() ){
-         eosio_assert( block_nums.empty(), "producers not consistent with block_nums" );
-         eosio_assert( pro.value != 0 && num != 0, "invalid parameters" );
-         producers.push_back( pro );
+         eosio_assert( block_nums.empty(), "internal error, producers not consistent with block_nums" );
+         eosio_assert( prod != name() && num != 0, "internal error, invalid parameters" );
+         producers.push_back( prod );
          block_nums.push_back( num );
          return;
       }
 
-      if( pro == producers.back() ){
+      eosio_assert( sch.producers.size() != 0, "producer_schedule can not be empty when section has data already");
+
+      auto bp = get_scheduled_producer( tslot, sch );
+      eosio_assert( bp == prod, "scheduled producer validate failed");
+
+      // ensure increasing one by one
+      eosio_assert( num == last + 1, "section_type::add, num is not correct");
+
+      // can not produce more then 12 blocks
+      eosio_assert( num <= block_nums.back() + 12 , "one producer can not produce more then 12 blocks continuously");
+
+      // same producer, do nothing
+      if( prod == producers.back() ){
          return;
-      } else {
-         eosio_assert( sch.producers.size() > 15, "less then 15 producers" );
-         int index_last = BIGNUM;
-         int index_this = BIGNUM;
-         int i = 0;
-         for ( const auto& pk : sch.producers ){
-            if ( pk.producer_name == producers.back() ){
-               index_last = i;
-            }
-            if ( pk.producer_name == pro ){
-               index_this = i;
-            }
-            ++i;
-         }
-         if ( index_this > index_last ){
-            eosio_assert( index_this - index_last <= MAXSPAN, "exceed max span" );
-         } else {
-            eosio_assert( index_last - index_this >= sch.producers.size() - MAXSPAN, "exceed max span" );
-         }
       }
 
+      // producer can not repeat within last 15 producers
+      int size = producers.size();
+      int count = size > 15 ? 15 : size;
+      for ( int i = 0; i < count ; ++i){
+         eosio_assert( prod != producers[ size - 1 - i ] , "producer can not repeat within last 15 producers" );
+      }
+
+      // Check if the distance from producers.back() to prod is greater then MAXSPAN
+      int index_last = BIGNUM;
+      int index_this = BIGNUM;
+      int i = 0;
+      for ( const auto& pk : sch.producers ){
+         if ( pk.producer_name == producers.back() ){
+            index_last = i;
+         }
+         if ( pk.producer_name == prod ){
+            index_this = i;
+         }
+         ++i;
+      }
+      if ( index_this > index_last ){
+         eosio_assert( index_this - index_last <= MAXSPAN, "exceed max span" );
+      } else {
+         eosio_assert( index_last - index_this >= sch.producers.size() - MAXSPAN, "exceed max span" );
+      }
+
+      // add
+      producers.push_back( prod );
+      block_nums.push_back( num );
+
+      // trim
       if( producers.size() > 21 ){
          producers.erase( producers.begin() );
          block_nums.erase( block_nums.begin() );
       }
-
-      eosio_assert( num <= block_nums.back() + 12 , "one producer can not produce more then 12 blocks continue" );
-
-
-
-      int size = producers.size();
-      int i = size >= 15 ? 15 : size;
-      i -= 1;
-      while ( i >= 0 ){
-         eosio_assert( pro != producers[i] , "producer can not repeat within last 15 producers" );
-         --i;
-      }
-
-      producers.push_back( pro );
-      block_nums.push_back( num );
    }
 
    void section_type::clear_from( uint32_t num ){
@@ -474,4 +635,6 @@ namespace eosio {
 
 } /// namespace eosio
 
-EOSIO_DISPATCH( eosio::chain, (setglobal)(chaininit)(pushsection)(relay)(blockmerkle) )
+EOSIO_DISPATCH( eosio::chain, (setglobal)(chaininit)(pushsection)(rminvalidls)(rmfirstsctn)(relay)(blockmerkle) )
+
+

@@ -22,7 +22,8 @@ namespace eosio {
          _origtrxs( _self, _self.value ),
          _cashtrxs( _self, _self.value ),
          _acntbls( _self, _self.value ),
-         _trxbls( _self, _self.value )
+         _trxbls( _self, _self.value ),
+         _rmdunrbs( _self, _self.value )
    {
       _gstate = _global_state.exists() ? _global_state.get() : global_state{};
       _gmutable = _global_mutable.exists() ? _global_mutable.get() : global_mutable{};
@@ -33,7 +34,7 @@ namespace eosio {
       _global_mutable.set( _gmutable, _self );
    }
    
-   void token::setglobal( name       ibc_contract,
+   void token::setglobal( name       ibc_chain_contract,
                           name       peerchain_ibc_token_contract,
                           uint32_t   max_origtrxs_table_records,
                           uint32_t   cache_cashtrxs_table_records,
@@ -41,7 +42,7 @@ namespace eosio {
                           bool       active ) {
       require_auth( _self );
 
-      _gstate.ibc_contract = ibc_contract;
+      _gstate.ibc_chain_contract = ibc_chain_contract;
       _gstate.peerchain_ibc_token_contract = peerchain_ibc_token_contract;
       _gstate.max_origtrxs_table_records = max_origtrxs_table_records;
       _gstate.cache_cashtrxs_table_records = cache_cashtrxs_table_records;
@@ -386,7 +387,7 @@ namespace eosio {
       eosio_assert( quantity.amount >= acpt.min_once_transfer.amount, "quantity less then min_once_transfer");
       eosio_assert( quantity.amount <= acpt.max_once_transfer.amount, "quantity greater then max_once_transfer");
 
-      // accumulate and check
+      // accumulate max_tfs_per_minute and check
       auto current_time_sec = now();
       uint32_t limit = acpt.max_tfs_per_minute > 0 ? acpt.max_tfs_per_minute : default_max_trx_per_minute_per_token;
       if ( current_time_sec > acpt.mutables.minute_trx_start + 60 ){
@@ -401,7 +402,7 @@ namespace eosio {
       }
       eosio_assert( acpt.mutables.minute_trxs <= limit,"max transactions per minute exceed" );
 
-
+      // accumulate max_daily_transfer and check
       if ( acpt.max_daily_transfer.amount != 0 ) {
          if ( current_time_sec > acpt.mutables.daily_tf_start + 3600 * 24 ){
             _accepts.modify( acpt, same_payer, [&]( auto& r ) {
@@ -413,9 +414,10 @@ namespace eosio {
                r.mutables.daily_tf_sum += quantity;
             });
          }
-         eosio_assert( acpt.mutables.daily_tf_sum <= acpt.max_daily_transfer,"max daily per minute exceed" );
+         eosio_assert( acpt.mutables.daily_tf_sum <= acpt.max_daily_transfer,"max daily transfer exceed" );
       }
 
+      // accumulate max_original_trxs_per_block and check
       if ( get_block_time_slot() == _gmutable.current_block_time_slot ) {
          _gmutable.current_block_trxs += 1;
          eosio_assert( _gmutable.current_block_trxs <= _gstate.max_original_trxs_per_block, "max_original_trxs_per_block exceed" );
@@ -430,31 +432,36 @@ namespace eosio {
          r.total_transfer_times += 1;
       });
 
-
       origtrxs_emplace( transfer_action_info{ original_contract, from, quantity } );
    }
 
    /**
     * memo string format specification:
+    * when to == _self, memo string must start with "local" or "ibc", any other prefix or empty memo string will assert failed
+    * when start with "local", means this is a local chain transaction
     * when start with "ibc", means this is a inter-blockchain communicatiion transaction
     * then memo string should meet the "ibc memo format of transfer action" described above
-    * when not start with "ibc", it will be processed as normal transfer
+    *
+    * when to != _self, memo string will not be parsed
     */
    void token::transfer( name    from,
                          name    to,
                          asset   quantity,
                          string  memo )
    {
-      if ( memo.find("ibc") == 0 ){
-         eosio_assert( to == _self, "to account must equal to _self in ibc transaction");
-         auto info = get_memo_info( memo );
-         eosio_assert( info.receiver != name(), "receiver not provide");
-         withdraw( from, info.receiver, quantity, info.notes );
-         return;
-      }
-
       eosio_assert( from != to, "cannot transfer to self" );
       require_auth( from );
+
+      if (  to == _self ) {
+         if ( memo.find("ibc") == 0 ){
+            auto info = get_memo_info( memo );
+            eosio_assert( info.receiver != name(), "receiver not provide");
+            withdraw( from, info.receiver, quantity, info.notes );
+            return;
+         }
+         eosio_assert( memo.find("local") == 0 , "when transfer to this contract, memo must start with \"ibc\" or \"local\"");
+      }
+
       eosio_assert( is_account( to ), "to account does not exist");
       auto sym = quantity.symbol.code();
       const auto& st = _stats.get( sym.raw() );
@@ -490,7 +497,7 @@ namespace eosio {
       const auto& balance = get_balance( _self, from, quantity.symbol.code() );
       eosio_assert( quantity.amount <= balance.amount, "overdrawn balance");
 
-      // accumulate and check
+      // accumulate max_wds_per_minute and check
       auto current_time_sec = now();
       auto limit = st.max_wds_per_minute > 0 ? st.max_wds_per_minute : default_max_trx_per_minute_per_token;
 
@@ -506,7 +513,7 @@ namespace eosio {
       }
       eosio_assert( st.mutables.minute_trxs <= limit, "max transactions per minute exceed" );
 
-
+      // accumulate max_daily_withdraw and check
       if ( st.max_daily_withdraw.amount != 0 ) {
          if ( current_time_sec > st.mutables.daily_wd_start + 3600 * 24 ){
             _stats.modify( st, same_payer, [&]( auto& r ) {
@@ -518,9 +525,10 @@ namespace eosio {
                r.mutables.daily_wd_sum += quantity;
             });
          }
-         eosio_assert( st.mutables.daily_wd_sum <= st.max_daily_withdraw,"max daily per minute exceed" );
+         eosio_assert( st.mutables.daily_wd_sum <= st.max_daily_withdraw,"max daily withdraw exceed" );
       }
 
+      // accumulate max_original_trxs_per_block and check
       if ( get_block_time_slot() == _gmutable.current_block_time_slot ) {
          _gmutable.current_block_trxs += 1;
          eosio_assert( _gmutable.current_block_trxs <= _gstate.max_original_trxs_per_block, "max_original_trxs_per_block exceed" );
@@ -537,6 +545,7 @@ namespace eosio {
 
       sub_balance( from, quantity );
       add_balance( _self, quantity, _self );
+
       origtrxs_emplace( transfer_action_info{ _self, from, quantity } );
    }
 
@@ -580,7 +589,7 @@ namespace eosio {
                      string                                 memo,
                      name                                   relay ) {
 
-      eosio_assert( chain::is_relay( _gstate.ibc_contract, relay ), "relay not exist");
+      eosio_assert( chain::is_relay( _gstate.ibc_chain_contract, relay ), "relay not exist");
       require_auth( relay );
 
       // check transaction blacklist
@@ -590,9 +599,9 @@ namespace eosio {
       eosio_assert( sym.is_valid(), "invalid symbol name" );
       eosio_assert( memo.size() <= 256, "memo has more than 256 bytes" );
 
-      eosio_assert( seq_num == get_cashtrxs_tb_max_seq_num() + 1, "seq_num not valid");
-      eosio_assert( orig_trx_block_num >= get_cashtrxs_tb_max_orig_trx_block_num(), "orig_trx_block_num error");
-      eosio_assert( false == is_orig_trx_id_exist_in_cashtrxs_tb(orig_trx_id), "orig_trx_id already exist");
+      eosio_assert( seq_num == get_cashtrxs_tb_max_seq_num() + 1, "seq_num not valid");   // seq_num is important, used to enable all successful cash transactions must be successfully returned to the original chain, no one will be lost
+      eosio_assert( orig_trx_block_num >= get_cashtrxs_tb_max_orig_trx_block_num(), "orig_trx_block_num error");  // important! used to prevent replay attack
+      eosio_assert( false == is_orig_trx_id_exist_in_cashtrxs_tb(orig_trx_id), "orig_trx_id already exist");      // important! used to prevent replay attack
 
       const transaction_receipt& trx_receipt = unpack<transaction_receipt>( orig_trx_packed_trx_receipt );
       packed_transaction pkd_trx = std::get<packed_transaction>(trx_receipt.trx);
@@ -608,23 +617,23 @@ namespace eosio {
 
       eosio_assert( args.to == _gstate.peerchain_ibc_token_contract, "transfer to account not correct" );
       eosio_assert( args.quantity == quantity, "quantity not equal to quantity within packed transaction" );
-      const memo_info_type& memo_info = get_memo_info( args.memo ); // to-do assert start with ibc
+      eosio_assert( args.memo.find("ibc") == 0, "internal error, memo not start with \"ibc\"" );
+      const memo_info_type& memo_info = get_memo_info( args.memo );
 
       eosio_assert( to == memo_info.receiver, "to not equal to receiver，which provided in memo string" );
+      eosio_assert( is_account( to ), "to account does not exist");
 
       // validate merkle path
-      verify_merkle_path( orig_trx_merkle_path, trx_receipt.digest());
+      verify_merkle_path( orig_trx_merkle_path, trx_receipt.digest() );
 
       // validate transaction_mroot with lwc
-      chain::assert_block_in_lib_and_trx_mroot_in_block( _gstate.ibc_contract, orig_trx_block_num, orig_trx_merkle_path.back() );
+      chain::assert_block_in_lib_and_trx_mroot_in_block( _gstate.ibc_chain_contract, orig_trx_block_num, orig_trx_merkle_path.back() );
 
       asset new_quantity;
 
       if ( actn.account != _gstate.peerchain_ibc_token_contract ){   // issue peg token to user
          const auto& st = get_currency_stats_by_orig_token_symbol( sym.code() );
          eosio_assert( st.active, "not active");
-
-         print( st.peerchain_contract );print(actn.account);print("****");
          eosio_assert( st.peerchain_contract == actn.account, " action.account not correct");
 
          eosio_assert( quantity.is_valid(), "invalid quantity" );
@@ -642,14 +651,13 @@ namespace eosio {
 
          add_balance( _self, new_quantity, _self );
          if( to != _self ) {
-            print(memo.c_str());print("mmmm");
-            transfer_action_type action_data{ _self, to, new_quantity, "" };
+            string new_memo = "from peerchain " + args.from.to_string() + "(" + quantity.to_string() + ") --ibc-issue--> thischain " + to.to_string() + "(" + new_quantity.to_string() + ")";
+            transfer_action_type action_data{ _self, to, new_quantity, new_memo };
             action( permission_level{ _self, "active"_n }, _self, "transfer"_n, action_data ).send();
          }
       } else {  // withdraw accepted token to user
          const auto& acpt = get_currency_accept_by_peg_token_symbol( quantity.symbol.code() );
          eosio_assert( acpt.active, "not active");
-
          eosio_assert( _gstate.peerchain_ibc_token_contract == actn.account, " action.account not correct");
 
          eosio_assert( quantity.is_valid(), "invalid quantity" );
@@ -659,6 +667,15 @@ namespace eosio {
 
          new_quantity = asset( quantity.amount, acpt.accept.symbol );
 
+         if ( acpt.service_fee_mode == "fixed"_n ){
+            eosio_assert( acpt.service_fee_fixed.amount >= 0, "internal error, service_fee_fixed config error");
+            new_quantity.amount -= acpt.service_fee_fixed.amount;
+         } else {
+            auto diff = int64_t( new_quantity.amount * acpt.service_fee_ratio );
+            eosio_assert( diff >= 0, "internal error, service_fee_ratio config error");
+            new_quantity.amount -= diff;
+         }
+
          _accepts.modify( acpt, same_payer, [&]( auto& r ) {
             r.accept -= new_quantity;
             r.total_cash += new_quantity;
@@ -666,13 +683,15 @@ namespace eosio {
          });
 
          if( to != _self ) {
+            string new_memo = "from peerchain " + args.from.to_string() + "(" + quantity.to_string() + ") --ibc-withdraw--> thischain " + to.to_string() + "(" + new_quantity.to_string() + ")";
             transfer_action_type action_data{ _self, to, new_quantity, memo };
             action( permission_level{ _self, "active"_n }, acpt.original_contract, "transfer"_n, action_data ).send();
          }
       }
 
-      // record to cash table
       trim_cashtrxs_table_or_not();
+
+      // record to cash table
       _cashtrxs.emplace( _self, [&]( auto& r ) {
             r.seq_num = seq_num;
             r.block_time_slot = get_block_time_slot();
@@ -696,7 +715,7 @@ namespace eosio {
       transaction trx = unpack<transaction>( pkd_trx.packed_trx );
       eosio_assert( trx.actions.size() == 1, "transfer transaction contains more then one action" );
 
-      // validate transaction id
+      // validate cash transaction id
       eosio_assert( std::memcmp(cash_trx_id.hash, pkd_trx.id().hash, 32) == 0, "cash_trx_id mismatch");
 
       // check issue action
@@ -705,33 +724,90 @@ namespace eosio {
       packed_transaction src_pkd_trx = std::get<packed_transaction>(src_tf_trx_receipt.trx);
       eosio_assert( std::memcmp(orig_trx_id.hash, src_pkd_trx.id().hash, 32) == 0, "orig_trx_id mismatch" );
 
+      // check cash_seq_num
       eosio_assert( args.seq_num == _gmutable.cash_seq_num + 1, "seq_num derived from cash_trx_packed_trx_receipt error" );
 
       // validate merkle path
       verify_merkle_path( cash_trx_merkle_path, trx_receipt.digest());
 
       // validate transaction_mroot with lwc
-      chain::assert_block_in_lib_and_trx_mroot_in_block( _gstate.ibc_contract, cash_trx_block_num, cash_trx_merkle_path.back() );
+      chain::assert_block_in_lib_and_trx_mroot_in_block( _gstate.ibc_chain_contract, cash_trx_block_num, cash_trx_merkle_path.back() );
 
-      // transfer table
+      // remove record in origtrxs table
       erase_record_in_origtrxs_tb_by_trx_id_for_confirmed( orig_trx_id );
 
       _gmutable.cash_seq_num += 1;
+   }
 
-//      return; // can not do this
-//      // defered rollback
-//      auto it = _origtrxs.begin();
-//      while ( it != _origtrxs.end() ){
-//         if ( it->block_time_slot + 2 < _gmutable.last_finished_trx_block_time_slot ){ // very important
-//            defered_rollback_trx( it->trx_id );
-//         }
-//      }
+   void token::rollback( const transaction_id_type trx_id, name relay ){    // notes: if non-rollbackable attacks occurred, such records need to be deleted manually, to prevent RAM from being maliciously occupied
+      eosio_assert( chain::is_relay( _gstate.ibc_chain_contract, relay ), "relay not exist");
+      require_auth( relay );
 
-      // todo 为了防止不可回滚攻击，当一个交易时间超过当前时间多长后，发送defered trx将交易trx 删除，但是在memo中写明详细信息。目的是保持origtrxs表不被恶意占用。
+      auto idx = _origtrxs.get_index<"trxid"_n>();
+      auto it = idx.find( fixed_bytes<32>(trx_id.hash) );
+      eosio_assert( it != idx.end(), "trx_id not exist");
+
+      eosio_assert( it->block_time_slot + 2 < _gmutable.last_confirmed_orig_trx_block_time_slot, "(block_time_slot + 2 < _gmutable.last_confirmed_orig_trx_block_time_slot) is false");
+
+      transfer_action_info action_info = it->action;
+      string memo = "rollback transaction: " + capi_checksum256_to_string(trx_id);
+      print( memo.c_str() );
+
+      if ( action_info.contract != _self ){  // rollback ibc transfer
+         const auto& acpt = get_currency_accept( action_info.contract );
+         _accepts.modify( acpt, same_payer, [&]( auto& r ) {
+            r.accept -= action_info.quantity;
+            r.total_transfer -= action_info.quantity;
+            r.total_transfer_times -= 1;
+         });
+
+         if( action_info.from != _self ) {
+            transfer_action_type action_data{ _self, action_info.from, action_info.quantity, memo };
+            action( permission_level{ _self, "active"_n }, acpt.original_contract, "transfer"_n, action_data ).send();
+         }
+      } else { // rollback ibc withdraw
+         const auto& st = get_currency_stats( action_info.quantity.symbol.code() );
+         _stats.modify( st, same_payer, [&]( auto& r ) {
+            r.supply += action_info.quantity;
+            r.max_supply += action_info.quantity;
+            r.total_withdraw -= action_info.quantity;
+            r.total_withdraw_times -= 1;
+         });
+
+         if( action_info.from != _self ) {
+            transfer_action_type action_data{ _self, action_info.from, action_info.quantity, memo };
+            action( permission_level{ _self, "active"_n }, _self, "transfer"_n, action_data ).send();
+         }
+      }
+
+      _origtrxs.erase( _origtrxs.find(it->id) );
+   }
+
+   static const uint32_t min_distance = 100;
+   void token::rmunablerb( const transaction_id_type trx_id, name relay ){
+      eosio_assert( chain::is_relay( _gstate.ibc_chain_contract, relay ), "relay not exist");
+      require_auth( relay );
+
+      auto idx = _origtrxs.get_index<"trxid"_n>();
+      auto it = idx.find( fixed_bytes<32>(trx_id.hash) );
+      eosio_assert( it != idx.end(), "trx_id not exist");
+
+      eosio_assert( it->block_time_slot + min_distance < _gmutable.last_confirmed_orig_trx_block_time_slot, "(block_time_slot + min_distance < _gmutable.last_confirmed_orig_trx_block_time_slot) is false");
+
+      _origtrxs.erase( _origtrxs.find(it->id) );
+
+      _rmdunrbs.emplace( _self, [&]( auto& r ) {
+         r.id        = _rmdunrbs.available_primary_key();
+         r.trx_id    = trx_id;
+      });
    }
 
    // this action maybe needed when repairing the ibc system manually
-   void token::rollback( const std::vector<transaction_id_type> trxs ) {
+   void token::fcrollback( const std::vector<transaction_id_type> trxs, string memo ) {
+      require_auth( _self );
+      eosio_assert( memo.size() <= 256, "memo has more than 256 bytes" );
+      eosio_assert( trxs.size() != 0, "no transacton" );
+
       for ( const auto& trx_id : trxs ){
          auto idx = _origtrxs.get_index<"trxid"_n>();
          auto record = idx.get( fixed_bytes<32>(trx_id.hash) );
@@ -746,7 +822,8 @@ namespace eosio {
             });
 
             if( action_info.from != _self ) {
-               transfer_action_type action_data{ _self, action_info.from, action_info.quantity, "rollback" };
+               string memo = "rollback transaction: " + capi_checksum256_to_string(trx_id);
+               transfer_action_type action_data{ _self, action_info.from, action_info.quantity, memo };
                action( permission_level{ _self, "active"_n }, acpt.original_contract, "transfer"_n, action_data ).send();
             }
          } else { // rollback withdraw
@@ -759,11 +836,25 @@ namespace eosio {
             });
 
             if( action_info.from != _self ) {
-               transfer_action_type action_data{ _self, action_info.from, action_info.quantity, "rollback" };
+               string memo = "rollback transaction: " + capi_checksum256_to_string(trx_id);
+               transfer_action_type action_data{ _self, action_info.from, action_info.quantity, memo };
                action( permission_level{ _self, "active"_n }, _self, "transfer"_n, action_data ).send();
             }
             return;
          }
+         _origtrxs.erase( record );
+      }
+   }
+
+   void token::fcrmorigtrx( const std::vector<transaction_id_type> trxs, string memo ){
+      require_auth( _self );
+      eosio_assert( memo.size() <= 256, "memo has more than 256 bytes" );
+      eosio_assert( trxs.size() != 0, "no transacton" );
+
+      for ( const auto& trx_id : trxs ){
+         auto idx = _origtrxs.get_index<"trxid"_n>();
+         auto it = idx.get( fixed_bytes<32>(trx_id.hash) );
+         _origtrxs.erase( it );
       }
    }
 
@@ -808,6 +899,7 @@ namespace eosio {
 
    void token::lockall() {
       require_auth( _self );
+      eosio_assert( _gstate.active == true, "_gstate.active == false, nothing to do");
       _gstate.active = false;
       _gstate.lock_start_time = 0;
       _gstate.lock_minutes = 0;
@@ -815,6 +907,7 @@ namespace eosio {
 
    void token::unlockall() {
       require_auth( _self );
+      eosio_assert( _gstate.active == false,  "_gstate.active == true, nothing to do");
       _gstate.active = true;
       _gstate.lock_start_time = 0;
       _gstate.lock_minutes = 0;
@@ -823,10 +916,21 @@ namespace eosio {
    void token::tmplock( uint32_t minutes ) {
       require_auth( permission_level( _self, "tmplock"_n) );
       eosio_assert( minutes <= 180, "minutes greater then 180" );
+      eosio_assert( _gstate.active == true, "_gstate.active == false, temporary lock is not allowed");
 
       _gstate.active = false;
       _gstate.lock_start_time = now();
       _gstate.lock_minutes = minutes;
+   }
+
+   void token::rmtmplock(){
+      require_auth( permission_level( _self, "tmplock"_n) );
+      eosio_assert( _gstate.active == false, "_gstate.active == true, nothing to do");
+      eosio_assert( _gstate.lock_minutes != 0, "no tmplock to remove");
+
+      _gstate.active = true;
+      _gstate.lock_start_time = 0;
+      _gstate.lock_minutes = 0;
    }
 
    void token::sub_balance( name owner, asset value ) {
@@ -880,7 +984,7 @@ namespace eosio {
       acnts.erase( it );
    }
 
-   // ---- global_state ----
+   // ---- global_state related methods ----
    bool token::is_global_active(){
       if ( _gstate.active == false ){
          if ( _gstate.lock_start_time == 0 ){
@@ -897,7 +1001,7 @@ namespace eosio {
       return true;
    }
 
-   // ---- currency_accept ----
+   // ---- currency_accept related methods ----
    const token::currency_accept& token::get_currency_accept( name contract ){
       return _accepts.get( contract.value, "token of contract does not support" );
    }
@@ -912,7 +1016,7 @@ namespace eosio {
       return idx.get( symcode.raw(),"token with symbol does not support" );
    }
 
-   // ---- currency_stats ----
+   // ---- currency_stats related methods  ----
    const token::currency_stats& token::get_currency_stats( symbol_code symcode ){
       return _stats.get( symcode.raw(), "token with symbol does not exist");
    }
@@ -922,7 +1026,7 @@ namespace eosio {
       return idx.get( symcode.raw(),"token with symbol does not support" );
    }
 
-   // ---- original_trx_info ----
+   // ---- original_trx_info related methods  ----
    void token::origtrxs_emplace( transfer_action_info action ) {
       transaction_id_type trx_id = get_trx_id();
       _origtrxs.emplace( _self, [&]( auto& r ){
@@ -932,51 +1036,6 @@ namespace eosio {
          r.action = action;
       });
       _gmutable.origtrxs_tb_next_id += 1;
-   }
-
-   void token::defered_rollback_trx( transaction_id_type trx_id ) {
-      auto idx = _origtrxs.get_index<"trxid"_n>();
-      auto it = idx.find( fixed_bytes<32>(trx_id.hash) );
-      transfer_action_info action_info = it->action;
-      transfer_action_type action_data{ _self, action_info.from, action_info.quantity, "rollback" };
-
-      action actn;
-      if ( action_info.contract != _self ){
-         const auto& acpt = get_currency_accept( action_info.contract );
-         _accepts.modify( acpt, same_payer, [&]( auto& r ) {
-            r.accept -= action_info.quantity;
-            r.total_transfer -= action_info.quantity;
-            r.total_transfer_times -= 1;
-         });
-
-         if( action_info.from != _self ) {
-            actn = action( { { _self, "active"_n} }, acpt.original_contract, "transfer"_n, action_data );
-         }
-         return;
-      } else {
-         const auto& st = get_currency_stats( action_info.quantity.symbol.code() );
-         _stats.modify( st, same_payer, [&]( auto& r ) {
-            r.supply += action_info.quantity;
-            r.max_supply += action_info.quantity;
-            r.total_withdraw -= action_info.quantity;
-            r.total_withdraw_times -= 1;
-         });
-
-         if( action_info.from != _self ) {
-            actn = action( { { _self, "active"_n} }, _self, "transfer"_n, action_data );
-         }
-         return;
-      }
-
-      transaction trx;
-      trx.expiration = time_point_sec(100);
-      trx.ref_block_num = 0;
-      trx.ref_block_prefix = 0;
-      trx.delay_sec = 1;
-      trx.actions.push_back( actn );
-      trx.send(*(static_cast<uint128_t*>(static_cast<void*>(trx_id.hash))), same_payer, true );
-
-      idx.erase( it );
    }
 
    bool token::is_trx_id_exist_in_origtrxs_tb( transaction_id_type trx_id ) {
@@ -989,29 +1048,33 @@ namespace eosio {
       auto idx = _origtrxs.get_index<"trxid"_n>();
       auto it = idx.find( fixed_bytes<32>(trx_id.hash) );
 
-      _gmutable.last_finished_trx_block_time_slot = it->block_time_slot;
+      _gmutable.last_confirmed_orig_trx_block_time_slot = it->block_time_slot;
 
-      if ( it != idx.end() ) { // todo use eosio_assert() ?
-         idx.erase(it);
+      if (  it == idx.end() ){   // do not use eosio_assert(), for this situation may be caused by _self manully operation
+         print("fatal internal error, trx_id not exist in origtrxs table!, removed it manully?");
+         return;
       }
-
+      idx.erase(it);
    }
 
-   // ---- cash_trx_info ----
+   // ---- cash_trx_info related methods  ----
    void token::trim_cashtrxs_table_or_not() {
       uint32_t total = 0;
-      auto it = _cashtrxs.begin();
-      while ( it != _cashtrxs.end() ){
-         ++total;
-         ++it;
+      if ( _cashtrxs.begin() == _cashtrxs.end()){
+         return;
       }
+      
+      total = (--_cashtrxs.end())->seq_num - _cashtrxs.begin()->seq_num;
+      
       if ( total > _gstate.cache_cashtrxs_table_records ){
-         auto end_block_num = _cashtrxs.rbegin()->orig_trx_block_num;
-         int i = total - _gstate.cache_cashtrxs_table_records;
+         auto last_orig_trx_block_num = _cashtrxs.rbegin()->orig_trx_block_num;
+         int i = 10; // 10 per time
          while ( i-- > 0 ){
-            auto start_block_num = _cashtrxs.begin()->orig_trx_block_num;
-            if ( end_block_num - start_block_num > 1 ) { // importand
+            auto first_orig_trx_block_num = _cashtrxs.begin()->orig_trx_block_num;
+            if ( last_orig_trx_block_num - first_orig_trx_block_num > 1 ) { // very importand
                _cashtrxs.erase( _cashtrxs.begin() );
+            } else {
+               break;
             }
          }
       }
@@ -1041,9 +1104,8 @@ namespace eosio {
    }
 
    /**
-    * Very importand function
+    * This is A Very Importand Function
     */
-
    bool token::is_orig_trx_id_exist_in_cashtrxs_tb( transaction_id_type orig_trx_id ) {
       auto idx = _cashtrxs.get_index<"trxid"_n>();
       auto it = idx.find( fixed_bytes<32>(orig_trx_id.hash) );
@@ -1053,46 +1115,26 @@ namespace eosio {
       return true;
    }
 
-   // ---- account_blacklist ----
+   // ---- account_blacklist related methods  ----
    bool token::is_in_acntbls( name account ) {
       return _acntbls.find( account.value ) != _acntbls.end();
    }
 
 
-   // ---- trx_blacklist ----
+   // ---- trx_blacklist related methods  ----
    bool token::is_in_trxbls( transaction_id_type trx_id ) {
       auto idx = _trxbls.get_index<"trxid"_n>();
       auto it = idx.find( fixed_bytes<32>(trx_id.hash) );
       return it != idx.end();
    }
 
-
-   void token::test( name who, uint64_t id ){
-//      print("***0");
-//      print(ibc::test( who,id));
-//      print("0***");
-
-//      accounts _acts("eosio.token"_n, who.value);
-//      auto exi = _acts.find( symbol_code("EOS").raw() );
-//
-//      _acts.modify( exi, same_payer, [&]( auto& r ) {
-//         r.balance.amount = 12345678;
-//      });
-
-      print("***&");
-//      print( exi->balance.to_string() );
-      print("&***");
-
-   }
-
 } /// namespace eosio
-
 
 extern "C" {
    void apply( uint64_t receiver, uint64_t code, uint64_t action ) {
       if( code == receiver ) {
          switch( action ) {
-            EOSIO_DISPATCH_HELPER( eosio::token, (test)(setglobal)(regacpttoken)(setacptasset)(setacptstr)(setacptint)(setacptbool)(setacptfee)(regpegtoken)(setpegasset)(setpegint)(setpegbool)(cash)(cashconfirm)(rollback)(trxbls)(acntbls)(lockall)(unlockall)(tmplock)(transfer)(open)(close) )
+            EOSIO_DISPATCH_HELPER( eosio::token, (setglobal)(regacpttoken)(setacptasset)(setacptstr)(setacptint)(setacptbool)(setacptfee)(regpegtoken)(setpegasset)(setpegint)(setpegbool)(transfer)(cash)(cashconfirm)(rollback)(rmunablerb)(fcrollback)(fcrmorigtrx)(trxbls)(acntbls)(lockall)(unlockall)(tmplock)(rmtmplock)(open)(close) )
          }
          return;
       }
