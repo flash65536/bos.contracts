@@ -226,6 +226,22 @@ namespace eosio {
         });
     }
 
+    void pegtoken::setissuer( symbol_code sym_code, name issuer )
+    {
+        require_auth(get_self());
+        ACCOUNT_CHECK(issuer);
+
+        auto sym_raw = sym_code.raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto iter = stats_table.find(sym_raw);
+        eosio_assert(iter != stats_table.end(), "token not exist");
+        
+        stats_table.modify(iter,same_payer,[&](auto & p) {
+            p.issuer = issuer;
+        });
+    }
+     
+
     void pegtoken::issue(asset quantity, string memo) {
         STRING_LEN_CHECK(memo, 256)
 
@@ -821,7 +837,7 @@ namespace eosio {
 
 } // namespace eosio
 
-EOSIO_DISPATCH( eosio::pegtoken, ( create )(update)(setlimit)(setauditor)(setfee)(issue)(retire)(applyaddr)(assignaddr)(
+EOSIO_DISPATCH( eosio::pegtoken, ( create )(update)(setlimit)(setauditor)(setissuer)(setfee)(issue)(retire)(applyaddr)(assignaddr)(
         withdraw)(deposit)(transfer)(clear)(feedback)(rollback)(setacceptor)(setdelay)(lockall)(unlockall)(approve)(
         unapprove)(sendback)
 ( rmwithdraw ));

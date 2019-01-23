@@ -28,6 +28,8 @@ public:
 
     [[eosio::action]] void setauditor( symbol_code sym_code, string action, name auditor );
 
+    [[eosio::action]] void setissuer( symbol_code sym_code, name issuer );
+
     [[eosio::action]] void setfee( double service_fee_rate, asset min_service_fee, asset miner_fee );
 
     [[eosio::action]] void issue( asset quantity, string memo );
