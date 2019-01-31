@@ -33,19 +33,55 @@ public:
 
     [[eosio::action]] void create( symbol sym, name issuer, name address_style, uint64_t peg );
     void create_v1( symbol sym, name issuer, name acceptor, name address_style, string organization, string website );
+    void create_v2( symbol sym, name issuer, name address_style);
+
+    [[eosio::action]] void setissuer( symbol_code sym_code, name issuer );
+    void setissuer_v1( symbol_code sym_code, name issuer );
+    void setissuer_v2( symbol_code sym_code, name issuer );
+
+    [[eosio::action]] void setedition( symbol_code sym_code );
+    
+    [[eosio::action]] void setpeg( symbol_code sym_code );
 
     [[eosio::action]] void update( symbol_code sym_code, string organization, string website );
     void update_v1( symbol_code sym_code, string organization, string website );
+    void update_v2( symbol_code sym_code, string organization, string website );
 
     [[eosio::action]] void setlimit( asset max_limit, asset min_limit, asset total_limit, uint64_t frequency_limit, uint64_t interval_limit );
     void setlimit_v1( asset max_limit, asset min_limit, asset total_limit, uint64_t frequency_limit, uint64_t interval_limit );
+    void setlimit_v2( asset max_limit, asset min_limit, asset total_limit, uint64_t frequency_limit, uint64_t interval_limit );
+
+    [[eosio::action]] void setmaxlimit( asset max_limit );
+    void setmaxlimit_v1( asset max_limit );
+    void setmaxlimit_v2( asset max_limit );
+
+    [[eosio::action]] void setminlimit( asset min_limit );
+    void setminlimit_v1( asset min_limit );
+    void setminlimit_v2( asset min_limit );
+
+    [[eosio::action]] void settotlimit( asset total_limit );
+    void settotlimit_v1( asset total_limit );
+    void settotlimit_v2( asset total_limit );
+
+    [[eosio::action]] void setfrelimit( symbol_code sym_code, uint64_t frequency_limit);
+    void setfrelimit_v1( symbol_code sym_code, uint64_t frequency_limit);
+    void setfrelimit_v2( symbol_code sym_code, uint64_t frequency_limit);
+
+    [[eosio::action]] void setintlimit( symbol_code sym_code, uint64_t interval_limit);
+    void setintlimit_v1( symbol_code sym_code, uint64_t interval_limit);
+    void setintlimit_v2( symbol_code sym_code, uint64_t interval_limit);
+    
+    [[eosio::action]] void setreslimit( symbol_code sym_code, uint64_t reset_limit);
+    void setreslimit_v1( symbol_code sym_code, uint64_t reset_limit);
+    void setreslimit_v2( symbol_code sym_code, uint64_t reset_limit);
+
+    [[eosio::action]] void setviplimit(name vip, asset maximum_limit, asset minimum_limit ,asset total_limit,uint64_t frequency_limit, uint64_t interval_limit,uint64_t reset_limit);
+    void setviplimit_v1(name vip, asset maximum_limit, asset minimum_limit ,asset total_limit,uint64_t frequency_limit, uint64_t interval_limit,uint64_t reset_limit);
+    void setviplimit_v2(name vip, asset maximum_limit, asset minimum_limit ,asset total_limit,uint64_t frequency_limit, uint64_t interval_limit,uint64_t reset_limit);
 
     // FIXME: setauditor is removed
     // [[eosio::action]] void setauditor( symbol_code sym_code, string action, name auditor );
     void setauditor_v1( symbol_code sym_code, string action, name auditor );
-
-    [[eosio::action]] void setissuer( symbol_code sym_code, name issuer );
-    void setissuer_v1( symbol_code sym_code, name issuer );
 
     [[eosio::action]] void setfee( double service_fee_rate, asset min_service_fee, asset miner_fee );
     void setfee_v1( double service_fee_rate, asset min_service_fee, asset miner_fee );
@@ -220,6 +256,7 @@ private:
         uint64_t primary_key() const { return balance.symbol.code().raw(); }
     };
 
+    // FIXME: no reset_limit
     struct [[eosio::table]] stat_ts {
         asset supply;
         asset max_limit;
@@ -382,6 +419,7 @@ private:
         name owner;
         asset maximum_limit;
         asset minimum_limit;
+        asset total_limit;
         uint64_t frequency_limit;
         uint64_t interval_limit;
         uint64_t reset_limit;
@@ -421,6 +459,7 @@ private:
         asset maximum_limit;
         asset minimum_limit;
         asset total_limit;
+        uint64_t frequency_limit;
         uint64_t interval_limit;
         uint64_t reset_limit;
 
@@ -441,7 +480,7 @@ private:
         string organization;
         string website;
 
-        uint64_t primary_key() const { return 0; }
+        uint64_t primary_key() const { return hash64(organization); }
     };
     using summaries = eosio::multi_index< "summaries"_n, summary_ts >;
 
