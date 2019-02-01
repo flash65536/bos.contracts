@@ -240,8 +240,59 @@ namespace eosio {
         }
     }
 
-    // FIXME: setauditor is removed
-    // void pegtoken::setauditor(symbol_code sym_code, string action, name auditor) { }
+    void pegtoken::setvipmaxlim(name vip, asset maximum_limit ) {
+        auto sym_code = maximum_limit.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setvipmaxlim_v1(vip,maximum_limit );
+            break;
+        case 2:
+            setvipmaxlim_v2(vip,maximum_limit );
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+        void pegtoken::setvipminlim(name vip, asset minimum_limit ) {
+        auto sym_code = minimum_limit.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setvipminlim_v1(vip,minimum_limit );
+            break;
+        case 2:
+            setvipminlim_v2(vip,minimum_limit );
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setviptotlim(name vip, asset totimum_limit ) {
+        auto sym_code = totimum_limit.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setviptotlim_v1(vip,totimum_limit );
+            break;
+        case 2:
+            setviptotlim_v2(vip,totimum_limit );
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
 
     void pegtoken::setfee(double service_fee_rate, asset min_service_fee, asset miner_fee) {
         auto sym_code = min_service_fee.symbol.code();
@@ -252,11 +303,159 @@ namespace eosio {
         case 1:
             setfee_v1(service_fee_rate,min_service_fee,miner_fee);
             break;
+        case 2:
+            setfee_v2(service_fee_rate,min_service_fee,miner_fee);
+            break;
         default:
             eosio_assert(false, "peg should be 1 or 2");
             break;
         }
     }
+
+    void pegtoken::setsrvfeerat(symbol_code sym_code, double service_fee_rate) {
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setsrvfeerat_v1(sym_code,service_fee_rate);
+            break;
+        case 2:
+            setsrvfeerat_v2(sym_code,service_fee_rate);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setminsrvfee(asset min_service_fee) {
+        auto sym_code = min_service_fee.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setminsrvfee_v1(min_service_fee);
+            break;
+        case 2:
+            setminsrvfee_v2(min_service_fee);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setminerfee(asset miner_fee) {
+        auto sym_code = miner_fee.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setminerfee_v1(miner_fee);
+            break;
+        case 2:
+            setminerfee_v2(miner_fee);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setvipfee(name vip, double service_fee_rate, asset min_service_fee, asset miner_fee ){
+        auto sym_code = min_service_fee.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setvipfee_v1(vip,service_fee_rate, min_service_fee, miner_fee);
+            break;
+        case 2:
+            setvipfee_v2(vip,service_fee_rate, min_service_fee, miner_fee);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setvipsrvfr(symbol_code sym_code, name vip,double service_fee_rate){
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setvipsrvfr_v1(sym_code,vip,service_fee_rate);
+            break;
+        case 2:
+            setvipsrvfr_v2(sym_code,vip,service_fee_rate);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setvipminfee(name vip, asset min_service_fee ) {
+        auto sym_code = min_service_fee.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setvipminfee_v1(vip,min_service_fee);
+            break;
+        case 2:
+            setvipminfee_v2(vip,min_service_fee);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setvipminerf(name vip, asset miner_fee ) {
+        auto sym_code = miner_fee.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setvipminerf_v1(vip,miner_fee);
+            break;
+        case 2:
+            setvipminerf_v2(vip,miner_fee);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::setdelay(symbol_code sym_code, uint64_t delayday) {
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            setdelay_v1(sym_code,delayday);
+            break;
+        case 2:
+            setdelay_v2(sym_code,delayday);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+    //TODO:
+
+    // FIXME: setauditor is removed
+    // void pegtoken::setauditor(symbol_code sym_code, string action, name auditor) { }
 
     void pegtoken::issue(asset quantity, string memo) {
         auto sym_code = quantity.symbol.code();
@@ -417,19 +616,6 @@ namespace eosio {
         }
     }
 
-    void pegtoken::setdelay(symbol_code sym_code, uint64_t delayday) {
-        auto peg_table = pegs(get_self(),sym_code.raw());
-        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
-        switch (pegval.peg)
-        {
-        case 1:
-            setdelay_v1(sym_code,delayday);
-            break;
-        default:
-            eosio_assert(false, "peg should be 1 or 2");
-            break;
-        }
-    }
 
     void pegtoken::lockall(symbol_code sym_code, name auditor) {
         auto peg_table = pegs(get_self(),sym_code.raw());
@@ -521,6 +707,8 @@ namespace eosio {
 // FIXME: setauditor is removed
 EOSIO_DISPATCH( eosio::pegtoken, (create)(setissuer)(setedition)(setpeg)(update)
         (setlimit)(setmaxlimit)(setminlimit)(settotlimit)(setfrelimit)(setintlimit)(setreslimit)
-        (setviplimit)
-        /*///////*//*(setauditor)*/(setfee)(issue)(retire)(applyaddr)(assignaddr)(
-        withdraw)(deposit)(transfer)(clear)(feedback)(rollback)(setacceptor)(setdelay)(lockall)(unlockall)(approve)(unapprove)(sendback)(rmwithdraw));
+        (setviplimit)(setvipmaxlim)(setvipminlim)(setviptotlim)(setfee)(setsrvfeerat)(setminsrvfee)(setminerfee)
+        (setvipfee)(setvipsrvfr)(setvipminfee)(setvipminerf)
+        (setdelay)
+        /*///////*//*(setauditor)*/(issue)(retire)(applyaddr)(assignaddr)(
+        withdraw)(deposit)(transfer)(clear)(feedback)(rollback)(setacceptor)(lockall)(unlockall)(approve)(unapprove)(sendback)(rmwithdraw));

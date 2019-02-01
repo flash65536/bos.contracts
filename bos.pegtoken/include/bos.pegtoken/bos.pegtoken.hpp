@@ -79,12 +79,58 @@ public:
     void setviplimit_v1(name vip, asset maximum_limit, asset minimum_limit ,asset total_limit,uint64_t frequency_limit, uint64_t interval_limit,uint64_t reset_limit);
     void setviplimit_v2(name vip, asset maximum_limit, asset minimum_limit ,asset total_limit,uint64_t frequency_limit, uint64_t interval_limit,uint64_t reset_limit);
 
-    // FIXME: setauditor is removed
-    // [[eosio::action]] void setauditor( symbol_code sym_code, string action, name auditor );
-    void setauditor_v1( symbol_code sym_code, string action, name auditor );
+    [[eosio::action]] void setvipmaxlim(name vip, asset maximum_limit );
+    void setvipmaxlim_v1(name vip, asset maximum_limit );
+    void setvipmaxlim_v2(name vip, asset maximum_limit );
+
+    [[eosio::action]] void setvipminlim(name vip, asset maximum_limit );
+    void setvipminlim_v1(name vip, asset maximum_limit );
+    void setvipminlim_v2(name vip, asset maximum_limit );
+
+    [[eosio::action]] void setviptotlim(name vip, asset maximum_limit );
+    void setviptotlim_v1(name vip, asset maximum_limit );
+    void setviptotlim_v2(name vip, asset maximum_limit );
 
     [[eosio::action]] void setfee( double service_fee_rate, asset min_service_fee, asset miner_fee );
     void setfee_v1( double service_fee_rate, asset min_service_fee, asset miner_fee );
+    void setfee_v2( double service_fee_rate, asset min_service_fee, asset miner_fee );
+
+    [[eosio::action]] void setsrvfeerat(symbol_code sym_code, double service_fee_rate);
+    void setsrvfeerat_v1(symbol_code sym_code, double service_fee_rate);
+    void setsrvfeerat_v2(symbol_code sym_code, double service_fee_rate);
+
+    [[eosio::action]] void setminsrvfee(asset min_service_fee);
+    void setminsrvfee_v1(asset min_service_fee);
+    void setminsrvfee_v2(asset min_service_fee);
+
+
+    [[eosio::action]] void setminerfee(asset miner_fee);
+    void setminerfee_v1(asset miner_fee);
+    void setminerfee_v2(asset miner_fee);
+
+    [[eosio::action]] void setvipfee(name vip, double service_fee_rate, asset min_service_fee, asset miner_fee );
+    void setvipfee_v1(name vip, double service_fee_rate, asset min_service_fee, asset miner_fee );
+    void setvipfee_v2(name vip, double service_fee_rate, asset min_service_fee, asset miner_fee );
+
+    [[eosio::action]] void setvipsrvfr(symbol_code sym_code, name vip,double service_fee_rate);
+    void setvipsrvfr_v1(symbol_code sym_code, name vip,double service_fee_rate);
+    void setvipsrvfr_v2(symbol_code sym_code, name vip,double service_fee_rate);
+    
+    [[eosio::action]] void setvipminfee(name vip, asset min_service_fee );
+    void setvipminfee_v1(name vip, asset min_service_fee );
+    void setvipminfee_v2(name vip, asset min_service_fee );
+
+    [[eosio::action]] void setvipminerf(name vip, asset miner_fee );
+    void setvipminerf_v1(name vip, asset miner_fee );
+    void setvipminerf_v2(name vip, asset miner_fee );
+
+    [[eosio::action]] void setdelay( symbol_code sym_code, uint64_t delayday );
+    void setdelay_v1( symbol_code sym_code, uint64_t delayday );
+    void setdelay_v2( symbol_code sym_code, uint64_t delayday );
+
+    // FIXME: setauditor is removed
+    // [[eosio::action]] void setauditor( symbol_code sym_code, string action, name auditor );
+    void setauditor_v1( symbol_code sym_code, string action, name auditor );
 
     [[eosio::action]] void issue( asset quantity, string memo );
     void issue_v1( asset quantity, string memo );
@@ -118,9 +164,6 @@ public:
 
     [[eosio::action]] void setacceptor( symbol_code sym_code, name acceptor );
     void setacceptor_v1( symbol_code sym_code, name acceptor );
-
-    [[eosio::action]] void setdelay( symbol_code sym_code, uint64_t delayday );
-    void setdelay_v1( symbol_code sym_code, uint64_t delayday );
 
     [[eosio::action]] void lockall( symbol_code sym_code, name auditor );
     void lockall_v1( symbol_code sym_code, name auditor );
@@ -472,7 +515,7 @@ private:
         asset min_service_fee;
         asset miner_fee;
 
-        uint64_t primary_key() const { return static_cast<uint64_t>(service_fee_rate); }
+        uint64_t primary_key() const { return min_service_fee.symbol.code().raw(); }
     };
     using fees = eosio::multi_index< "fees"_n, fee_ts >;
 

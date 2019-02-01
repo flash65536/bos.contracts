@@ -179,6 +179,185 @@ namespace eosio {
         }
     }
 
+    void pegtoken::setvipmaxlim_v1(name vip, asset maximum_limit ) {
+        auto sym_raw = maximum_limit.symbol.code().raw();
+        auto viplimit_table = viplimits(get_self(),sym_raw);
+        auto iter = viplimit_table.find(vip.value);
+        if (iter == viplimit_table.end() ){
+            auto zero_asset = eosio::asset(0,maximum_limit.symbol);
+            setviplimit_v1(vip,maximum_limit,zero_asset,zero_asset,0,0,0);
+        } else {
+            setviplimit_v1(vip,maximum_limit,iter->minimum_limit,iter->total_limit,
+            iter->frequency_limit,iter->interval_limit,iter->reset_limit);
+        }
+    }
+
+    void pegtoken::setvipminlim_v1(name vip, asset minimum_limit ) {
+        auto sym_raw = minimum_limit.symbol.code().raw();
+        auto viplimit_table = viplimits(get_self(),sym_raw);
+        auto iter = viplimit_table.find(vip.value);
+        if (iter == viplimit_table.end() ){
+            auto zero_asset = eosio::asset(0,minimum_limit.symbol);
+            setviplimit_v1(vip,zero_asset,minimum_limit,zero_asset,0,0,0);
+        } else {
+            setviplimit_v1(vip,iter->maximum_limit,minimum_limit,iter->total_limit,
+            iter->frequency_limit,iter->interval_limit,iter->reset_limit);
+        }
+    }
+
+    void pegtoken::setviptotlim_v1(name vip, asset total_limit ) {
+        auto sym_raw = total_limit.symbol.code().raw();
+        auto viplimit_table = viplimits(get_self(),sym_raw);
+        auto iter = viplimit_table.find(vip.value);
+        if (iter == viplimit_table.end() ){
+            auto zero_asset = eosio::asset(0,total_limit.symbol);
+            setviplimit_v1(vip,zero_asset,zero_asset,total_limit,0,0,0);
+        } else {
+            setviplimit_v1(vip,iter->maximum_limit,iter->minimum_limit,total_limit,
+            iter->frequency_limit,iter->interval_limit,iter->reset_limit);
+        }
+    }
+
+    void pegtoken::setfee_v1(double service_fee_rate, asset min_service_fee, asset miner_fee) {
+        eosio_assert(
+                service_fee_rate >= 0 && service_fee_rate < 1 && min_service_fee.amount >= 0 && miner_fee.amount >= 0,
+                "invalid service_fee_rate or min_service_fee or miner_fee");
+        eosio_assert(min_service_fee.symbol == miner_fee.symbol,
+                     "min_service_fee and miner_fee are not the same symbol");
+
+        auto sym_raw = min_service_fee.symbol.code().raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto iter = stats_table.find(sym_raw);
+        eosio_assert(iter != stats_table.end(), "token not exist");
+        require_auth(iter->issuer);
+
+        stats_table.modify(iter, same_payer, [&](auto &p) {
+            p.service_fee_rate = service_fee_rate;
+            p.min_service_fee = min_service_fee;
+            p.miner_fee = miner_fee;
+        });
+    }
+
+    void pegtoken::setsrvfeerat_v1(symbol_code sym_code, double service_fee_rate){
+        auto sym_raw = sym_code.raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto val = stats_table.get(sym_raw,"token not exist");
+        setfee_v1(service_fee_rate, val.min_service_fee,val.miner_fee);
+    }
+
+    void pegtoken::setminsrvfee_v1(asset min_service_fee){
+        auto sym_raw = min_service_fee.symbol.code().raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto val = stats_table.get(sym_raw,"token not exist");
+        setfee_v1(val.service_fee_rate, min_service_fee,val.miner_fee);
+    }
+    
+    void pegtoken::setminerfee_v1(asset miner_fee){
+        auto sym_raw = miner_fee.symbol.code().raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto val = stats_table.get(sym_raw,"token not exist");
+        setfee_v1(val.service_fee_rate, val.min_service_fee,miner_fee);
+    }
+
+    void pegtoken::setvipfee_v1(name vip, double service_fee_rate, asset min_service_fee, asset miner_fee ){
+        eosio_assert(min_service_fee.symbol == miner_fee.symbol, "invlaid symbol");
+        auto sym_raw = min_service_fee.symbol.code().raw();
+        
+        auto stats_table = stats(get_self(), sym_raw);
+        auto iter = stats_table.find(sym_raw);
+        eosio_assert(iter != stats_table.end(), "token not exist");
+        require_auth(iter->issuer);
+
+        auto vip_table = vips(get_self(),sym_raw);
+        auto viplimit_table = viplimits(get_self(),sym_raw);
+        auto vipfee_table = vipfees(get_self(),sym_raw);
+        
+        auto iter_vip = vip_table.find(vip.value);
+        if(iter_vip == vip_table.end()){
+            auto zero_asset = eosio::asset(0,min_service_fee.symbol);
+            vip_table.emplace(get_self(),[&](auto &p){
+                p.vip = vip;
+                p.create_time = time_point_sec(now());
+            });
+            viplimit_table.emplace(get_self(),[&](auto &p){
+                p.owner = vip;
+                p.maximum_limit = zero_asset;
+                p.minimum_limit = zero_asset;
+                p.total_limit = zero_asset;
+                p.frequency_limit = 0;
+                p.interval_limit = 0;
+                p.reset_limit = 0;
+            });
+            vipfee_table.emplace(get_self(),[&](auto &p){
+                p.owner = vip;
+                p.service_fee_rate = service_fee_rate;
+                p.min_service_fee = min_service_fee;
+                p.miner_fee = miner_fee;
+            });
+        } else {
+            vipfee_table.modify(
+                vipfee_table.find(vip.value),same_payer,
+                [&](auto &p){
+                p.service_fee_rate = service_fee_rate;
+                p.min_service_fee = min_service_fee;
+                p.miner_fee = miner_fee;
+            });
+        }
+    }
+
+    void pegtoken::setvipsrvfr_v1(symbol_code sym_code, name vip,double service_fee_rate) {
+        auto sym_raw = sym_code.raw();
+
+        auto vipfee_table = vipfees(get_self(), sym_raw);
+        auto iter = vipfee_table.find(vip.value);
+        if(iter == vipfee_table.end() ) {
+            auto zero_asset = eosio::asset(0,eosio::symbol(sym_raw));
+            setvipfee_v1(vip,service_fee_rate,zero_asset,zero_asset);
+        } else {
+            setvipfee_v1(vip,service_fee_rate,iter->min_service_fee ,iter->miner_fee);
+        }
+    }
+
+    void pegtoken::setvipminfee_v1(name vip, asset min_service_fee ){
+        auto sym_raw = min_service_fee.symbol.code().raw();
+
+        auto vipfee_table = vipfees(get_self(), sym_raw);
+        auto iter = vipfee_table.find(vip.value);
+        if(iter == vipfee_table.end() ) {
+            auto zero_asset = eosio::asset(0,eosio::symbol(sym_raw));
+            setvipfee_v1(vip,0,min_service_fee,zero_asset);
+        } else {
+            setvipfee_v1(vip,iter->service_fee_rate,min_service_fee ,iter->miner_fee);
+        }
+    }
+
+    void pegtoken::setvipminerf_v1(name vip, asset miner_fee ){
+        auto sym_raw = miner_fee.symbol.code().raw();
+
+        auto vipfee_table = vipfees(get_self(), sym_raw);
+        auto iter = vipfee_table.find(vip.value);
+        if(iter == vipfee_table.end() ) {
+            auto zero_asset = eosio::asset(0,eosio::symbol(sym_raw));
+            setvipfee_v1(vip,0,zero_asset,miner_fee);
+        } else {
+            setvipfee_v1(vip,iter->service_fee_rate,iter->min_service_fee ,miner_fee);
+        }
+    }
+
+
+    void pegtoken::setdelay_v1(symbol_code sym_code, uint64_t delayday) {
+        auto sym_raw = sym_code.raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto iter = stats_table.find(sym_raw);
+        eosio_assert(iter != stats_table.end(), "token not exist");
+        require_auth(iter->issuer);
+
+        stats_table.modify(iter, same_payer, [&](auto &p) {
+            p.delayday = delayday;
+        });
+    }
+
+    // TODO:
 //////////////
     void pegtoken::setauditor_v1(symbol_code sym_code, string action, name auditor) {
         { ACCOUNT_CHECK(auditor) };
@@ -207,26 +386,6 @@ namespace eosio {
         } else {
             eosio_assert(false, ("invalid action: " + action).c_str());
         }
-    }
-
-    void pegtoken::setfee_v1(double service_fee_rate, asset min_service_fee, asset miner_fee) {
-        eosio_assert(
-                service_fee_rate >= 0 && service_fee_rate < 1 && min_service_fee.amount >= 0 && miner_fee.amount >= 0,
-                "invalid service_fee_rate or min_service_fee or miner_fee");
-        eosio_assert(min_service_fee.symbol == miner_fee.symbol,
-                     "min_service_fee and miner_fee are not the same symbol");
-
-        auto sym_raw = min_service_fee.symbol.code().raw();
-        auto stats_table = stats(get_self(), sym_raw);
-        auto iter = stats_table.find(sym_raw);
-        eosio_assert(iter != stats_table.end(), "token not exist");
-        require_auth(iter->issuer);
-
-        stats_table.modify(iter, same_payer, [&](auto &p) {
-            p.service_fee_rate = service_fee_rate;
-            p.min_service_fee = min_service_fee;
-            p.miner_fee = miner_fee;
-        });
     }
 
     void pegtoken::setissuer_v1( symbol_code sym_code, name issuer )
@@ -673,18 +832,6 @@ namespace eosio {
 
         stats_table.modify(iter, same_payer, [&](auto &p) {
             p.acceptor = acceptor;
-        });
-    }
-
-    void pegtoken::setdelay_v1(symbol_code sym_code, uint64_t delayday) {
-        auto sym_raw = sym_code.raw();
-        auto stats_table = stats(get_self(), sym_raw);
-        auto iter = stats_table.find(sym_raw);
-        eosio_assert(iter != stats_table.end(), "token not exist");
-        require_auth(iter->issuer);
-
-        stats_table.modify(iter, same_payer, [&](auto &p) {
-            p.delayday = delayday;
         });
     }
 
