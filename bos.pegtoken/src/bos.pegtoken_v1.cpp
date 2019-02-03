@@ -357,6 +357,68 @@ namespace eosio {
         });
     }
 
+    void pegtoken::issue_v1(asset quantity, string memo) {
+        STRING_LEN_CHECK(memo, 256)
+
+        eosio_assert(quantity.is_valid() && quantity.amount > 0, "invalid quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto iter = stats_table.find(sym_raw);
+        eosio_assert(iter != stats_table.end(), "token not exist");
+        require_auth(iter->issuer);
+
+        ACCOUNT_CHECK(iter->acceptor)
+        eosio_assert(iter->active, "token is not active");
+
+        add_balance(iter->acceptor, quantity, iter->issuer);
+        stats_table.modify(iter, same_payer, [&](auto &p) {
+            p.supply += quantity;
+            eosio_assert(p.supply.amount > 0, "supply overflow");
+        });
+
+        auto oper = operates(get_self(), quantity.symbol.code().raw());
+        oper.emplace(get_self(), [&](auto &p) {
+            p.id = oper.available_primary_key();
+            p.to = iter->acceptor;
+            p.quantity = quantity;
+            p.type = 1;
+            p.operate_time = time_point_sec(now());
+            p.memo = memo;
+        });
+    }
+
+        void pegtoken::retire_v1(asset quantity, string memo) {
+        STRING_LEN_CHECK(memo, 256)
+
+        eosio_assert(quantity.is_valid() && quantity.amount > 0, "invalid quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto stats_table = stats(get_self(), sym_raw);
+        auto iter = stats_table.find(sym_raw);
+        eosio_assert(iter != stats_table.end(), "token not exist");
+        require_auth(iter->issuer);
+
+        ACCOUNT_CHECK(iter->acceptor)
+        eosio_assert(iter->active, "token is not active");
+        eosio_assert(iter->supply >= quantity, "invalid quantity");
+
+        sub_balance(iter->acceptor, quantity);
+        stats_table.modify(iter, same_payer, [&](auto &p) {
+            p.supply -= quantity;
+        });
+
+        auto oper = operates(get_self(), quantity.symbol.code().raw());
+        oper.emplace(get_self(), [&](auto &p) {
+            p.id = oper.available_primary_key();
+            p.to = iter->acceptor;
+            p.quantity = quantity;
+            p.type = 0;
+            p.operate_time = time_point_sec(now());
+            p.memo = memo;
+        });
+    }
+
     // TODO:
 //////////////
     void pegtoken::setauditor_v1(symbol_code sym_code, string action, name auditor) {
@@ -404,67 +466,7 @@ namespace eosio {
     }
      
 
-    void pegtoken::issue_v1(asset quantity, string memo) {
-        STRING_LEN_CHECK(memo, 256)
 
-        eosio_assert(quantity.is_valid() && quantity.amount > 0, "invalid quantity");
-
-        auto sym_raw = quantity.symbol.code().raw();
-        auto stats_table = stats(get_self(), sym_raw);
-        auto iter = stats_table.find(sym_raw);
-        eosio_assert(iter != stats_table.end(), "token not exist");
-        require_auth(iter->issuer);
-
-        ACCOUNT_CHECK(iter->acceptor)
-        eosio_assert(iter->active, "token is not active");
-
-        add_balance(iter->acceptor, quantity, iter->issuer);
-        stats_table.modify(iter, same_payer, [&](auto &p) {
-            p.supply += quantity;
-            eosio_assert(p.supply.amount > 0, "supply overflow");
-        });
-
-        auto oper = operates(get_self(), quantity.symbol.code().raw());
-        oper.emplace(get_self(), [&](auto &p) {
-            p.id = oper.available_primary_key();
-            p.to = iter->acceptor;
-            p.quantity = quantity;
-            p.type = 1;
-            p.operate_time = time_point_sec(now());
-            p.memo = memo;
-        });
-    }
-
-    void pegtoken::retire_v1(asset quantity, string memo) {
-        STRING_LEN_CHECK(memo, 256)
-
-        eosio_assert(quantity.is_valid() && quantity.amount > 0, "invalid quantity");
-
-        auto sym_raw = quantity.symbol.code().raw();
-        auto stats_table = stats(get_self(), sym_raw);
-        auto iter = stats_table.find(sym_raw);
-        eosio_assert(iter != stats_table.end(), "token not exist");
-        require_auth(iter->issuer);
-
-        ACCOUNT_CHECK(iter->acceptor)
-        eosio_assert(iter->active, "token is not active");
-        eosio_assert(iter->supply >= quantity, "invalid quantity");
-
-        sub_balance(iter->acceptor, quantity);
-        stats_table.modify(iter, same_payer, [&](auto &p) {
-            p.supply -= quantity;
-        });
-
-        auto oper = operates(get_self(), quantity.symbol.code().raw());
-        oper.emplace(get_self(), [&](auto &p) {
-            p.id = oper.available_primary_key();
-            p.to = iter->acceptor;
-            p.quantity = quantity;
-            p.type = 0;
-            p.operate_time = time_point_sec(now());
-            p.memo = memo;
-        });
-    }
 
     void pegtoken::applyaddr_v1(symbol_code sym_code, name to) {
 

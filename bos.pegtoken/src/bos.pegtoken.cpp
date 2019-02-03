@@ -452,10 +452,7 @@ namespace eosio {
             break;
         }
     }
-    //TODO:
 
-    // FIXME: setauditor is removed
-    // void pegtoken::setauditor(symbol_code sym_code, string action, name auditor) { }
 
     void pegtoken::issue(asset quantity, string memo) {
         auto sym_code = quantity.symbol.code();
@@ -465,6 +462,9 @@ namespace eosio {
         {
         case 1:
             issue_v1(quantity,memo);
+            break;
+        case 2:
+            issue_v2(quantity,memo);
             break;
         default:
             eosio_assert(false, "peg should be 1 or 2");
@@ -481,11 +481,92 @@ namespace eosio {
         case 1:
             retire_v1(quantity,memo);
             break;
+        case 2:
+            retire_v2(quantity,memo);
+            break;
         default:
             eosio_assert(false, "peg should be 1 or 2");
             break;
         }
     }
+
+    void pegtoken::precast(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo){
+        auto sym_code = quantity.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            eosio_assert(false, "precast not suported");
+            break;
+        case 2:
+            precast_v2(to_address,to_account,remote_trx_id,index,quantity,memo);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::agreecast(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo){
+        auto sym_code = quantity.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            eosio_assert(false, "agreecast not suported");
+            break;
+        case 2:
+            agreecast_v2(auditor,to_address,to_account,remote_trx_id,index,quantity,memo);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::refusecast(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo){
+        auto sym_code = quantity.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            eosio_assert(false, "agreecast not suported");
+            break;
+        case 2:
+            refusecast_v2(auditor,to_address,to_account,remote_trx_id,index,quantity,memo);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+
+    void pegtoken::docast(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo){
+        auto sym_code = quantity.symbol.code();
+        auto peg_table = pegs(get_self(),sym_code.raw());
+        auto pegval = peg_table.get(sym_code.raw(),"no such peg");
+        switch (pegval.peg)
+        {
+        case 1:
+            eosio_assert(false, "agreecast not suported");
+            break;
+        case 2:
+            docast_v2(to_address,to_account,remote_trx_id,index,quantity,memo);
+            break;
+        default:
+            eosio_assert(false, "peg should be 1 or 2");
+            break;
+        }
+    }
+    //TODO:
+
+    // FIXME: setauditor is removed
+    // void pegtoken::setauditor(symbol_code sym_code, string action, name auditor) { }
+
+
 
     void pegtoken::applyaddr(symbol_code sym_code, name to) {
         auto peg_table = pegs(get_self(),sym_code.raw());
@@ -710,5 +791,7 @@ EOSIO_DISPATCH( eosio::pegtoken, (create)(setissuer)(setedition)(setpeg)(update)
         (setviplimit)(setvipmaxlim)(setvipminlim)(setviptotlim)(setfee)(setsrvfeerat)(setminsrvfee)(setminerfee)
         (setvipfee)(setvipsrvfr)(setvipminfee)(setvipminerf)
         (setdelay)
-        /*///////*//*(setauditor)*/(issue)(retire)(applyaddr)(assignaddr)(
+        (issue)(retire)
+        (precast)(agreecast)(refusecast)(docast)
+        /*///////*//*(setauditor)*/(applyaddr)(assignaddr)(
         withdraw)(deposit)(transfer)(clear)(feedback)(rollback)(setacceptor)(lockall)(unlockall)(approve)(unapprove)(sendback)(rmwithdraw));

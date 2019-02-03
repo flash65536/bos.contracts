@@ -395,4 +395,213 @@ namespace eosio {
             });
         }
     }
+
+    void pegtoken::issue_v2(asset quantity, string memo) {
+        STRING_LEN_CHECK(memo, 256)
+
+        eosio_assert(quantity.is_valid() && quantity.amount > 0, "invalid quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto info_table = infos(get_self(),sym_raw);
+        auto iter = info_table.find(sym_raw);
+        eosio_assert(iter != info_table.end(), "token not exist");
+        require_auth(iter->issuer);
+
+        eosio_assert(iter->active, "token is not active");
+
+        auto acceptor_table = acceptors(get_self(),sym_raw);
+        eosio_assert(acceptor_table.begin() != acceptor_table.end(), "no acceptor set");
+        auto acceptor = acceptor_table.begin()->acceptor;
+        ACCOUNT_CHECK(acceptor)
+        add_balance(acceptor, quantity, iter->issuer);
+        info_table.modify(iter, same_payer, [&](auto &p) {
+            p.supply += quantity;
+            eosio_assert(p.supply.amount > 0, "supply overflow");
+        });
+
+        auto oper = operates(get_self(), quantity.symbol.code().raw());
+        oper.emplace(get_self(), [&](auto &p) {
+            p.id = oper.available_primary_key();
+            p.to = acceptor;
+            p.quantity = quantity;
+            p.type = 1;
+            p.operate_time = time_point_sec(now());
+            p.memo = memo;
+        });
+    }
+
+    void pegtoken::retire_v2(asset quantity, string memo) {
+        STRING_LEN_CHECK(memo, 256)
+
+        eosio_assert(quantity.is_valid() && quantity.amount > 0, "invalid quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto info_table = infos(get_self(),sym_raw);
+        auto iter = info_table.find(sym_raw);
+        eosio_assert(iter != info_table.end(), "token not exist");
+        require_auth(iter->issuer);
+
+        eosio_assert(iter->active, "token is not active");
+        eosio_assert(iter->supply >= quantity, "invalid quantity");
+
+        auto acceptor_table = acceptors(get_self(),sym_raw);
+        eosio_assert(acceptor_table.begin() != acceptor_table.end(), "no acceptor set");
+        auto acceptor = acceptor_table.begin()->acceptor;
+        ACCOUNT_CHECK(acceptor)
+        sub_balance(acceptor, quantity);
+        info_table.modify(iter, same_payer, [&](auto &p) {
+            p.supply -= quantity;
+        });
+
+        auto oper = operates(get_self(), quantity.symbol.code().raw());
+        oper.emplace(get_self(), [&](auto &p) {
+            p.id = oper.available_primary_key();
+            p.to = acceptor;
+            p.quantity = quantity;
+            p.type = 0;
+            p.operate_time = time_point_sec(now());
+            p.memo = memo;
+        });
+    }
+
+    void pegtoken::precast_v2(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo) {
+        ACCOUNT_CHECK(to_account)
+        STRING_LEN_CHECK(memo,256)
+        eosio_assert(quantity.amount > 0, "non-positive quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto info_table = infos(get_self(),sym_raw);
+        auto val = info_table.get(sym_raw, "token with symbol not exists(info)");
+        eosio_assert(to_account != val.issuer && to_account != get_self(), "invalid to_account");
+        require_auth(val.issuer);
+        
+        auto addr_table = addrs(get_self(), sym_raw);
+        auto iter_addr = addr_table.find(to_account.value);
+        eosio_assert(iter_addr != addr_table.end() && iter_addr->address == to_address, "invalid to_address");
+
+        auto cast_table = casts(get_self(), sym_raw);
+        
+        auto index_str = to_address + to_account.to_string() + remote_trx_id + std::to_string(index) + quantity.to_string();
+        cast_table.emplace(get_self(),[&](auto &p){
+            p.id = hash64(index_str);
+            p.to_account = to_account;
+            p.to_address = to_address;
+            p.quantity = quantity;
+            p.state = 0;
+            p.remote_trx_id = remote_trx_id;
+            p.index = index;
+            p.enable = 0;
+            p.msg = memo;
+
+            p.create_time = time_point_sec(now());
+            p.update_time = time_point_sec(now());
+
+            p.auditor = NIL_ACCOUNT;
+        });
+    }
+
+    void pegtoken::agreecast_v2(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo) {
+        ACCOUNT_CHECK(to_account)
+        STRING_LEN_CHECK(memo,256)
+        eosio_assert(quantity.amount > 0, "non-positive quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto auditor_table = auditors(get_self(),sym_raw);
+        eosio_assert(auditor_table.find(auditor.value) != auditor_table.end(), "invalid auditor");
+        require_auth(auditor);
+
+        auto addr_table = addrs(get_self(), sym_raw);
+        auto iter_addr = addr_table.find(to_account.value);
+        eosio_assert(iter_addr != addr_table.end() && iter_addr->address == to_address, "invalid to_address");
+
+        auto cast_table = casts(get_self(), sym_raw);
+        auto index_str = to_address + to_account.to_string() + remote_trx_id + std::to_string(index) + quantity.to_string();
+        auto iter_cast = cast_table.find(hash64(index_str));
+        eosio_assert(iter_cast != cast_table.end()
+        && iter_cast -> to_account == to_account
+        && iter_cast -> to_address == to_address
+        && iter_cast -> remote_trx_id == remote_trx_id
+        && iter_cast -> index == index
+        && iter_cast -> quantity == quantity
+         , "invalid cast");
+
+        cast_table.modify(iter_cast,same_payer,[&](auto &p){
+            p.enable = 1;
+            p.msg = memo;
+            p.auditor = auditor;
+            p.update_time = time_point_sec(now());
+        });
+    }
+
+    void pegtoken::refusecast_v2(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo) {
+        ACCOUNT_CHECK(to_account)
+        STRING_LEN_CHECK(memo,256)
+        eosio_assert(quantity.amount > 0, "non-positive quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto auditor_table = auditors(get_self(),sym_raw);
+        eosio_assert(auditor_table.find(auditor.value) != auditor_table.end(), "invalid auditor");
+        require_auth(auditor);
+
+        auto addr_table = addrs(get_self(), sym_raw);
+        auto iter_addr = addr_table.find(to_account.value);
+        eosio_assert(iter_addr != addr_table.end() && iter_addr->address == to_address, "invalid to_address");
+
+        auto cast_table = casts(get_self(), sym_raw);
+        auto index_str = to_address + to_account.to_string() + remote_trx_id + std::to_string(index) + quantity.to_string();
+        auto iter_cast = cast_table.find(hash64(index_str));
+        eosio_assert(iter_cast != cast_table.end()
+        && iter_cast -> to_account == to_account
+        && iter_cast -> to_address == to_address
+        && iter_cast -> remote_trx_id == remote_trx_id
+        && iter_cast -> index == index
+        && iter_cast -> quantity == quantity
+         , "invalid cast");
+
+        cast_table.modify(iter_cast,same_payer,[&](auto &p){
+            p.enable = 0;
+            p.msg = memo;
+            p.auditor = auditor;
+            p.update_time = time_point_sec(now());
+        });
+    }
+
+    void pegtoken::docast_v2(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo) {
+        ACCOUNT_CHECK(to_account)
+        STRING_LEN_CHECK(memo,256)
+        eosio_assert(quantity.amount > 0, "non-positive quantity");
+
+        auto sym_raw = quantity.symbol.code().raw();
+        auto info_table = infos(get_self(),sym_raw);
+        auto iter_info = info_table.find(sym_raw);
+        eosio_assert(iter_info != info_table.end(), "token not exist");
+        require_auth(iter_info->issuer);
+
+        auto addr_table = addrs(get_self(), sym_raw);
+        auto iter_addr = addr_table.find(to_account.value);
+        eosio_assert(iter_addr != addr_table.end() && iter_addr->address == to_address, "invalid to_address");
+
+        auto cast_table = casts(get_self(), sym_raw);
+        auto index_str = to_address + to_account.to_string() + remote_trx_id + std::to_string(index) + quantity.to_string();
+        auto iter_cast = cast_table.find(hash64(index_str));
+        eosio_assert(iter_cast != cast_table.end()
+        && iter_cast -> to_account == to_account
+        && iter_cast -> to_address == to_address
+        && iter_cast -> remote_trx_id == remote_trx_id
+        && iter_cast -> index == index
+        && iter_cast -> quantity == quantity
+         , "invalid cast");
+
+        cast_table.modify(iter_cast,same_payer,[&](auto &p){
+            p.trx_id = get_trx_id();
+            p.msg = memo;
+            p.update_time = time_point_sec(now());
+        });
+
+        add_balance(to_account, quantity, iter_info->issuer);
+        info_table.modify(iter_info,same_payer,[&](auto &p){
+            p.supply += quantity;
+            eosio_assert(p.supply.amount >0, "supply overflow");
+        });
+    }
 }

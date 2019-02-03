@@ -128,15 +128,32 @@ public:
     void setdelay_v1( symbol_code sym_code, uint64_t delayday );
     void setdelay_v2( symbol_code sym_code, uint64_t delayday );
 
-    // FIXME: setauditor is removed
-    // [[eosio::action]] void setauditor( symbol_code sym_code, string action, name auditor );
-    void setauditor_v1( symbol_code sym_code, string action, name auditor );
 
     [[eosio::action]] void issue( asset quantity, string memo );
     void issue_v1( asset quantity, string memo );
+    void issue_v2( asset quantity, string memo );
 
     [[eosio::action]] void retire( asset quantity, string memo );
     void retire_v1( asset quantity, string memo );
+    void retire_v2( asset quantity, string memo );
+
+    [[eosio::action]] void precast(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+    void precast_v2(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+
+    //FIXME: audito must be involved
+    [[eosio::action]] void agreecast(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+    void agreecast_v2(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+
+    [[eosio::action]] void refusecast(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+    void refusecast_v2(name auditor, string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+    
+    [[eosio::action]] void docast(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+    void docast_v2(string to_address, name to_account, string remote_trx_id, uint64_t index, asset quantity, string memo);
+    
+    // TODO:
+    // FIXME: setauditor is removed
+    // [[eosio::action]] void setauditor( symbol_code sym_code, string action, name auditor );
+    void setauditor_v1( symbol_code sym_code, string action, name auditor );
 
     [[eosio::action]] void applyaddr( symbol_code sym_code, name to );
     void applyaddr_v1( symbol_code sym_code, name to );
@@ -412,11 +429,16 @@ private:
         uint64_t id;
         transaction_id_type trx_id;
         name to_account;
+        string to_address;
         asset quantity;
         uint64_t state;        
         string remote_trx_id;
         uint64_t index;
         uint64_t remote_index;
+        uint64_t enable;
+
+        // FIXME: auditor is not set in doc
+        name auditor;
 
         string msg;
         time_point_sec create_time;
